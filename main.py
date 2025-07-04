@@ -1,48 +1,96 @@
-from fastapi import FastAPI, Depends  # FastAPI class and dependency injection
+# from fastapi import FastAPI, Depends  # FastAPI class and dependency injection
+# from sqlalchemy.orm import Session
+# from database import SessionLocal, engine, Base
+# import crud
+
+# # Create the tables in the database if they don't exist
+# from database import SessionLocal, engine, Base
+
+# app = FastAPI()
+
+# # Dependency to get a database session for each request
+# # This will automatically create and close the DB connection
+# def get_db():
+#     db = SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
+
+# # GET endpoint to retrieve all users
+# # 'db: Session = Depends(get_db)' means: call get_db(), inject result as 'db'
+# @app.get("/users")
+# def read_users(db: Session = Depends(get_db)):
+#     return crud.get_users(db)
+
+# # POST endpoint to add a new user
+# @app.post("/users")
+# def add_user(name: str, email: str, db: Session = Depends(get_db)):
+#         return crud.create_user(db, name, email)
+
+# @app.put("/users/{user_id}")
+# def update_user(user_id: int, name: str, email: str, db: Session = Depends(get_db)):
+#     user = crud.get_user_by_id(db, user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found") # type: ignore
+#     return crud.update_user(db, user_id, name, email)
+
+# # DELETE - Delete user by ID
+# @app.delete("/users/{user_id}")
+# def delete_user(user_id: int, db: Session = Depends(get_db)):
+#     user = crud.get_user_by_id(db, user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found") # type: ignore
+#     return crud.delete_user(db, user_id)
+
+# main.py (FastAPI)
+
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine, Base
-import crud
-from crud import create_user, get_users
+import shutil
+import os
 
+import models
+import database
+import utils
 
-# Create the tables in the database if they don't exist
-Base.metadata.create_all(bind=engine)
-from fastapi import HTTPException
+models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI()
 
-# Dependency to get a database session for each request
-# This will automatically create and close the DB connection
 def get_db():
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# GET endpoint to retrieve all users
-# 'db: Session = Depends(get_db)' means: call get_db(), inject result as 'db'
-@app.get("/users")
-def read_users(db: Session = Depends(get_db)):
-    return crud.get_users(db)
+@app.post("/upload-users/")
+async def upload_users(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    My_file = f"temp_{load_workbook}"
+    with open(temp_file, "wb") as buffer:
+        shutil.copyfileobj(load_workbook, buffer)
 
-# POST endpoint to add a new user
-@app.post("/users")
-def add_user(name: str, email: str, db: Session = Depends(get_db)):
-    return crud.create_user(db, name, email)
+    try:
+        users = utils.parse_excel(temp_file)
+        if not users:
+            raise HTTPException(status_code=400, detail="No valid user records found.")
 
-# PUT: Update an existing user's name or email
-@app.put("/users/{user_id}")
-def update_user(user_id: int, name: str = None, email: str = None, db: Session = Depends(get_db)):
-    user = crud.update_user(db, user_id, name, email)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found") # type: ignore
-    return user
+        created = 0
+        for user_data in users:
+            
+            existing = db.query(models.User).filter_by(email=user_data.email).first()
+            if existing:
+                continue
+            user = models.User(
+                name=user_data.name,
+                email=user_data.email,
+                phone=user_data.phone
+            )
+            db.add(user)
+            created += 1
 
-# DELETE: Delete a user
-@app.delete("/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
-    result = crud.delete_user(db, user_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="User not found") # type: ignore
-    return {"message": "User deleted successfully"}
+        db.commit()
+        return {"message": f"Uploaded successfully. {created} users created."}
+    finally:
+        os.remove(My_file)
